@@ -1,152 +1,159 @@
-# Spanish intent classification for a caregiving assistant
+# Clasificación de intenciones en español para un asistente de cuidados
 
-Master's thesis (Big Data & AI). Personal project, sole developer, built with AI assistance
-(Claude Code and Codex) as part of my day-to-day workflow; the methodology, the analysis below
-and the conclusions are mine.
-The training pipeline, the raw result files and the deployment artifacts are all in this repository.
-The app they were built for is private; paths under `functions/` refer to that private codebase.
+Trabajo de fin de máster (Big Data e IA). Proyecto personal, desarrollador único, construido con
+ayuda de IA (Claude Code y Codex) como parte de mi flujo de trabajo diario; la metodología, el
+análisis que sigue y las conclusiones son míos.
+El pipeline de entrenamiento, los ficheros de resultados en bruto y los artefactos de despliegue están todos en este repositorio.
+La app para la que se construyeron es privada; las rutas bajo `functions/` apuntan a ese código privado.
 
-Five intent classifiers trained on 118,445 synthetic Spanish utterances across 12 intents. The
-best of them was exported to ONNX and wired into a Firebase callable function. The interesting
-part of this repository is not the accuracy table — it is the audit that shows why the accuracy
-table is close to meaningless.
+Cinco clasificadores de intenciones entrenados sobre 118.445 frases sintéticas en español repartidas
+en 12 intenciones. El mejor de ellos se exportó a ONNX y se conectó a una función callable de
+Firebase. Lo interesante de este repositorio no es la tabla de accuracy: es la auditoría que
+explica por qué esa tabla no significa casi nada.
 
 ## TL;DR
 
-- Naive Bayes, Random Forest, LinearSVC, a BiLSTM and multilingual BERT all land between
-  **99.39% and 99.57%** test accuracy. Twenty-one errors separate best from worst, over 11,845
-  test examples. Their 95% Wilson intervals overlap completely, so the ranking is not defensible.
-- I then measured what the test set actually contains: **98.66% of test examples were generated
-  from a template that also appears in train**, and **4 of 103,574 test tokens** are out of
-  vocabulary. The headline number measures template memorisation, not generalisation.
-- **52 of the BiLSTM's 53 errors** fall on one template string emitted under two different labels
-  by my own generator (`build_dataset.py:407` and `build_dataset.py:582`). The residual error is a
-  dataset bug, not a modelling limit.
-- The BiLSTM was exported to ONNX and served from a Cloud Function. That deployment has a real,
-  reproducible **train/serve tokenisation skew**, measured in section 7. It is **not merged into
-  the published app**.
+- Naive Bayes, Random Forest, LinearSVC, un BiLSTM y BERT multilingüe se quedan todos entre el
+  **99,39% y el 99,57%** de accuracy en test. Veintiún errores separan al mejor del peor, sobre
+  11.845 ejemplos de test. Sus intervalos de Wilson al 95% se solapan por completo, así que el
+  ranking no es defendible.
+- Después medí qué contiene realmente el conjunto de test: **el 98,66% de los ejemplos de test se
+  generaron a partir de una plantilla que también aparece en train** y **4 de 103.574 tokens
+  de test** quedan fuera del vocabulario. La cifra de portada mide memorización de plantillas, no
+  generalización.
+- **52 de los 53 errores del BiLSTM** caen sobre una misma cadena de plantilla que mi propio
+  generador emite con dos etiquetas distintas (`build_dataset.py:407` y `build_dataset.py:582`). El
+  error residual es un bug del dataset, no un límite del modelado.
+- El BiLSTM se exportó a ONNX y se sirve desde una Cloud Function. Ese despliegue tiene un
+  **desajuste de tokenización entre entrenamiento y servicio** real y reproducible, medido en la
+  sección 7. **No está integrado en la app publicada**.
 
 ---
 
-## 1. The task
+## 1. La tarea
 
-Plamily is a Flutter app I built for families coordinating the care of an older relative:
-medication schedules, reminders, a shared shopping list, contacts. The thesis asks whether a text
-(later voice) entry point can collapse a multi-screen flow into one sentence —
-*"ya me he tomado el paracetamol"*.
+Plamily es una app Flutter que construí para familias que coordinan el cuidado de un familiar
+mayor: pautas de medicación, recordatorios, una lista de la compra compartida, contactos. El TFM se
+pregunta si un punto de entrada por texto (y más adelante por voz) puede reducir un flujo de varias
+pantallas a una sola frase: *«ya me he tomado el paracetamol»*.
 
-The pipeline splits into three stages, and only the first one is the thesis's subject:
+El pipeline se divide en tres etapas y solo la primera es objeto del TFM:
 
-| Stage | How it is solved | In this repo |
+| Etapa | Cómo se resuelve | ¿Está en este repo? |
 |---|---|---|
-| Intent classification | Trained model, 12 classes | Yes — the whole comparison |
-| Entity extraction | Claude Haiku API call (`functions/index.js:3565`) | Deployed, not benchmarked |
-| Action execution | Firestore writes, per intent (`functions/index.js:3742`) | Deployed, not benchmarked |
+| Clasificación de intenciones | Modelo entrenado, 12 clases | Sí — toda la comparación |
+| Extracción de entidades | Llamada a la API de Claude Haiku (`functions/index.js:3565`) | Desplegada, sin medir |
+| Ejecución de la acción | Escrituras en Firestore, una por intención (`functions/index.js:3742`) | Desplegada, sin medir |
 
-This matters for reading the results honestly: **the trained model does intent classification only**.
-Entity extraction is delegated to an LLM at request time. The original plan included a NER head; it
-was not built.
+Esto importa para leer los resultados con honestidad: **el modelo entrenado solo hace clasificación
+de intenciones**. La extracción de entidades se delega en un LLM en tiempo de petición. El plan
+original incluía una cabeza de NER; no llegó a construirse.
 
-### The 12 intents
+### Las 12 intenciones
 
-`build_dataset.py` asks each generator for a target count and stops early when intra-intent
-deduplication exhausts the template space. Five intents hit that ceiling, which is where the class
-imbalance comes from:
+`build_dataset.py` pide a cada generador un número objetivo de ejemplos y se detiene antes de tiempo
+cuando la deduplicación dentro de la intención agota el espacio de plantillas. Cinco intenciones
+tocan ese techo, y de ahí viene el desbalance de clases:
 
-| Intent | Target | Generated | Test support | What it does in the app |
+| Intención | Objetivo | Generados | Soporte en test | Qué hace en la app |
 |---|---:|---:|---:|---|
-| `add_medication` | 20,000 | 20,000 | 2,038 | Creates a medication with dose, frequency and schedule |
-| `add_reminder` | 20,000 | 20,000 | 2,019 | Creates a dated reminder for a tracked person |
-| `mark_medication_taken` | 15,000 | 15,000 | 1,446 | Marks the pending dose of the day as taken |
-| `add_contact` | 15,000 | 15,000 | 1,506 | Adds a phone contact to a tracked person |
-| `add_shopping_item` | 15,000 | 15,000 | 1,529 | Appends items to the shared shopping list |
-| `list_medications` | 10,000 | 10,000 | 1,014 | Lists active medications for a person |
-| `check_medication_status` | 10,000 | **5,802** | 565 | Reports which doses are still pending today |
-| `mark_shopping_done` | 10,000 | **8,096** | 791 | Marks a shopping item as bought |
-| `list_reminders` | 8,000 | 8,000 | 791 | Lists upcoming reminders |
-| `list_shopping` | 5,000 | **460** | 45 | Shows the pending shopping list |
-| `greeting` | 3,000 | **607** | 44 | Direct canned reply |
-| `help` | 3,000 | **480** | 57 | Direct canned reply |
+| `add_medication` | 20,000 | 20,000 | 2,038 | Crea un medicamento con dosis, frecuencia y horario |
+| `add_reminder` | 20,000 | 20,000 | 2,019 | Crea un recordatorio con fecha para una persona bajo seguimiento |
+| `mark_medication_taken` | 15,000 | 15,000 | 1,446 | Marca como tomada la dosis pendiente del día |
+| `add_contact` | 15,000 | 15,000 | 1,506 | Añade un contacto telefónico a una persona bajo seguimiento |
+| `add_shopping_item` | 15,000 | 15,000 | 1,529 | Añade artículos a la lista de la compra compartida |
+| `list_medications` | 10,000 | 10,000 | 1,014 | Lista los medicamentos activos de una persona |
+| `check_medication_status` | 10,000 | **5,802** | 565 | Informa de qué dosis siguen pendientes hoy |
+| `mark_shopping_done` | 10,000 | **8,096** | 791 | Marca un artículo de la compra como comprado |
+| `list_reminders` | 8,000 | 8,000 | 791 | Lista los próximos recordatorios |
+| `list_shopping` | 5,000 | **460** | 45 | Muestra la lista de la compra pendiente |
+| `greeting` | 3,000 | **607** | 44 | Respuesta enlatada directa |
+| `help` | 3,000 | **480** | 57 | Respuesta enlatada directa |
 | **Total** | 134,000 | **118,445** | 11,845 | |
 
-Class imbalance is **43.5x** (`add_medication` 20,000 vs `list_shopping` 460). Random Forest and
-LinearSVC use `class_weight="balanced"` (`train_random_forest.py:80`, `train_svm.py:82`); Naive
-Bayes and the two neural models do not compensate at all. This is why **F1-macro, not accuracy, is
-the metric to read** in the table below.
+El desbalance de clases es de **43,5x** (`add_medication` 20.000 frente a `list_shopping` 460).
+Random Forest y LinearSVC usan `class_weight="balanced"` (`train_random_forest.py:80`,
+`train_svm.py:82`); Naive Bayes y los dos modelos neuronales no compensan nada. Por eso **la métrica
+que hay que leer en la tabla siguiente es la F1-macro, no la accuracy**.
 
 ---
 
-## 2. The dataset is 100% synthetic
+## 2. El dataset es 100% sintético
 
-There is no way around stating this first, because it is the first question any reviewer should ask.
+No hay forma de esquivarlo, y va primero porque es la primera pregunta que debería hacer cualquiera
+que revise esto.
 
-**Why synthetic.** The app had no conversational surface, so there was no log of real user phrasing
-to mine — a cold start with zero in-domain data. Two options were on the table:
+**Por qué sintético.** La app no tenía ninguna superficie conversacional, así que no había ningún
+registro de frases reales de usuario que explotar: un arranque en frío con cero datos del dominio.
+Había dos opciones sobre la mesa:
 
-1. Generate with an LLM (`generate_dataset.py`, `claude-sonnet-4-20250514` at line 326).
-   Estimated ~$80 for the target volume. **Never executed** — discarded on cost
+1. Generar con un LLM (`generate_dataset.py`, `claude-sonnet-4-20250514` en la línea 326). Coste
+   estimado de unos 80 $ para el volumen objetivo. **Nunca se ejecutó**: descartado por coste
    (`TFM_PROGRESS.md:196`).
-2. Generate locally from fixed templates plus randomised entity slots
-   (`build_dataset.py`, 969 lines). Free, instant, deterministic. **This is what produced the data.**
+2. Generar en local a partir de plantillas fijas más huecos de entidad aleatorizados
+   (`build_dataset.py`, 969 líneas). Gratis, instantáneo, determinista. **Esto es lo que produjo los
+   datos.**
 
-**How it works.** Twelve generator functions compose f-string templates with curated entity pools —
-73 person references (`"mi abuela"`, `"la yaya"`, `"mamá"`, proper names), 67 medication names
-including colloquial ones (`"la pastilla de la tensión"`), 90 products, 25 stores, 41 times, 34
-dates. An 8% probability typo/orthography corruption pass (`build_dataset.py:217`) simulates the
-accent-dropping and abbreviation habits of mobile Spanish input (`"qué"` → `"que"`,
-`"por favor"` → `"xfa"`).
+**Cómo funciona.** Doce funciones generadoras componen plantillas f-string con bolsas de entidades
+curadas: 73 referencias a personas (`"mi abuela"`, `"la yaya"`, `"mamá"`, nombres propios),
+67 nombres de medicamento incluyendo los coloquiales (`"la pastilla de la tensión"`), 90 productos,
+25 tiendas, 41 horas, 34 fechas. Una pasada de corrupción ortográfica y de erratas con un 8% de
+probabilidad (`build_dataset.py:217`) simula las costumbres de la escritura en móvil en español
+—comerse las tildes y abreviar— (`"qué"` → `"que"`, `"por favor"` → `"xfa"`).
 
-Reconstructing every example's skeleton (substituting entity values back into placeholders) gives
-**2,424 distinct `(intent, skeleton)` pairs** for 118,445 examples — an average of 49 examples per
-skeleton. Restricted to the nine entity-bearing intents, it is 1,337 skeletons for 117,358
-examples, or 88 examples per skeleton. Section 4.2 is the direct consequence.
+Si se reconstruye el esqueleto de cada ejemplo (sustituyendo los valores de entidad de vuelta por
+sus marcadores) salen **2.424 pares `(intent, skeleton)` distintos** para 118.445 ejemplos: una
+media de 49 ejemplos por esqueleto. Si nos limitamos a las nueve intenciones que llevan entidades,
+son 1.337 esqueletos para 117.358 ejemplos, es decir, 88 ejemplos por esqueleto. La sección 4.2 es
+la consecuencia directa.
 
-**Reproducibility.** `random.seed(42)` at `build_dataset.py:14`, no API calls, no external state.
-I re-ran the generator from a clean checkout while writing this README and got the identical split,
-example for example, in 1.5 s:
+**Reproducibilidad.** `random.seed(42)` en `build_dataset.py:14`, sin llamadas a API y sin estado
+externo. Reejecuté el generador desde un checkout limpio mientras escribía este README y obtuve el
+mismo split, ejemplo por ejemplo, en 1,5 s:
 
 ```
 TOTAL: 118,445 examples generated
   train: 94,756   val: 11,844   test: 11,845
 ```
 
-**What the data is not.** It is not real user speech. Vocabulary, sentence length and syntactic
-variety are bounded by what I thought of while writing the templates. Every claim in this
-repository is bounded by that ceiling too.
+**Lo que estos datos no son.** No son habla real de usuarios. El vocabulario, la longitud de las
+frases y la variedad sintáctica están limitados por lo que se me ocurrió al escribir las plantillas.
+Todas las afirmaciones de este repositorio están limitadas por ese mismo techo.
 
 ---
 
-## 3. The five models
+## 3. Los cinco modelos
 
-Trained on an i9 / 64 GB / RTX 4060 workstation (`TFM_PROGRESS.md:108`). Classical models on CPU,
-neural models on GPU.
+Entrenados en una workstation i9 / 64 GB / RTX 4060 (`TFM_PROGRESS.md:108`). Los modelos clásicos en
+CPU, los neuronales en GPU.
 
-| Model | Config | Accuracy | F1-macro | Errors /11,845 | Params | Train time |
+| Modelo | Configuración | Accuracy | F1-macro | Errores /11,845 | Params | Tiempo de entrenamiento |
 |---|---|---:|---:|---:|---:|---:|
-| Naive Bayes + TF-IDF | `MultinomialNB(alpha=0.1)`, 1-2 grams, 50k features | 0.9939 | 0.9890 | 72 | — | **0.036 s** |
-| Random Forest + TF-IDF | 200 trees, balanced | 0.9942 | 0.9896 | 69 | — | 6.81 s |
+| Naive Bayes + TF-IDF | `MultinomialNB(alpha=0.1)`, n-gramas 1-2, 50k features | 0.9939 | 0.9890 | 72 | — | **0.036 s** |
+| Random Forest + TF-IDF | 200 árboles, balanced | 0.9942 | 0.9896 | 69 | — | 6.81 s |
 | SVM (LinearSVC) + TF-IDF | `C=1.0`, `max_iter=10000`, balanced | 0.9949 | 0.9912 | 60 | — | 4.94 s |
-| **BiLSTM** | 2x256 hidden, 128-dim emb., dropout 0.3, 15 epochs (best: 6) | 0.9955 | **0.9941** | 53 | 2,550,796 | 131 s |
-| BERT multilingual | `bert-base-multilingual-cased`, lr 2e-5, 3 epochs (best: 2) | **0.9957** | 0.9937 | 51 | 177,862,668 | 3,276 s |
+| **BiLSTM** | 2x256 ocultas, emb. 128 dim., dropout 0.3, 15 épocas (mejor: 6) | 0.9955 | **0.9941** | 53 | 2,550,796 | 131 s |
+| BERT multilingual | `bert-base-multilingual-cased`, lr 2e-5, 3 épocas (mejor: 2) | **0.9957** | 0.9937 | 51 | 177,862,668 | 3,276 s |
 
-All three TF-IDF vectorisers keep accents (`strip_accents=None`) — an explicit choice for Spanish.
-The BiLSTM vocabulary is built from train only, with `MIN_WORD_FREQ = 2`, tokenised as
-`text.lower().split()` (`train_bilstm.py:77-88`).
+Los tres vectorizadores TF-IDF conservan las tildes (`strip_accents=None`): una decisión explícita
+por ser español. El vocabulario del BiLSTM se construye solo con train, con `MIN_WORD_FREQ = 2`,
+tokenizando con `text.lower().split()` (`train_bilstm.py:77-88`).
 
-Per-intent, the BiLSTM scores **F1 = 1.0000 on nine of the twelve classes**. A perfect score on
-nine classes is not an achievement; it is a symptom, and it is what sent me looking.
+Por intención, el BiLSTM saca **F1 = 1,0000 en nueve de las doce clases**. Un resultado perfecto en
+nueve clases no es un logro: es un síntoma, y es lo que me hizo empezar a mirar.
 
 ---
 
-## 4. Why these numbers don't mean what they look like
+## 4. Por qué estos números no significan lo que parece
 
-This is the section the thesis is actually about.
+Esta es la sección de la que va realmente el TFM.
 
-### 4.1 The ranking is statistically empty
+### 4.1 El ranking no tiene contenido estadístico
 
-Best minus worst is **21 errors out of 11,845**. Wilson 95% intervals:
+La diferencia entre el mejor y el peor es de **21 errores sobre 11.845**. Intervalos de Wilson al
+95%:
 
-| Model | Accuracy | Wilson 95% CI |
+| Modelo | Accuracy | IC Wilson 95% |
 |---|---:|---|
 | Naive Bayes | 99.39% | [99.24, 99.52] |
 | Random Forest | 99.42% | [99.26, 99.54] |
@@ -154,33 +161,35 @@ Best minus worst is **21 errors out of 11,845**. Wilson 95% intervals:
 | BiLSTM | 99.55% | [99.42, 99.66] |
 | BERT | 99.57% | [99.43, 99.67] |
 
-Every interval overlaps every other one. Naive Bayes's upper bound (99.52) sits above BERT's lower
-bound (99.43). **"BERT is the best model" is not a claim this experiment can support.** Any thesis
-that reports the ordering as a finding is over-reading its own data.
+Todos los intervalos se solapan entre sí. La cota superior de Naive Bayes (99,52) queda por encima
+de la cota inferior de BERT (99,43). **«BERT es el mejor modelo» no es una afirmación que este
+experimento pueda sostener.** Cualquier TFM que presente ese orden como un hallazgo está leyendo en
+sus propios datos más de lo que hay.
 
-### 4.2 98.66% of the test set leaks from train
+### 4.2 El 98,66% del conjunto de test se filtra desde train
 
-The generator produces all 118,445 examples first, then applies a flat `random.shuffle()` before
-slicing 80/10/10 (`build_dataset.py:945-955`). Templates are not held out, and with an average of
-49 examples per skeleton, essentially every skeleton lands on all three sides of the split.
+El generador produce primero los 118.445 ejemplos y después aplica un `random.shuffle()` plano antes
+de cortar 80/10/10 (`build_dataset.py:945-955`). Las plantillas no se reservan, y con una media de
+49 ejemplos por esqueleto prácticamente todos los esqueletos acaban en los tres lados del split.
 
-Measured by reconstructing each example's skeleton and intersecting the sets:
+Medido reconstruyendo el esqueleto de cada ejemplo e intersecando los conjuntos:
 
 ```
 distinct (intent, skeleton) pairs in train       : 2,105
 test examples whose skeleton is already in train : 11,686 / 11,845 = 98.66%
 ```
 
-This is leakage of phrasing, not of rows: deduplication is exact-string within each intent, so only
-**16 of 11,845** test examples appear verbatim in train. The model has not memorised the test rows;
-it has memorised the 2,105 sentence patterns they were stamped from.
+Es una fuga de formulación, no de filas: la deduplicación es por cadena exacta dentro de cada
+intención, así que solo **16 de 11.845** ejemplos de test aparecen literalmente en train. El modelo
+no ha memorizado las filas de test; ha memorizado los 2.105 patrones de frase de los que
+salieron.
 
-Of the 159 test examples whose skeleton is genuinely new, 146 belong to the three intents with no
-entity slots (`help` 57, `list_shopping` 45, `greeting` 44), where skeleton and text are the same
-string by construction. That leaves **13 examples out of 11,845** across the nine entity-bearing
-intents that present phrasing the model has never seen.
+De los 159 ejemplos de test cuyo esqueleto es genuinamente nuevo, 146 pertenecen a las tres
+intenciones sin huecos de entidad (`help` 57, `list_shopping` 45, `greeting` 44), donde esqueleto y
+texto son la misma cadena por construcción. Quedan **13 ejemplos de 11.845** repartidos entre las
+nueve intenciones con entidades que presentan una formulación que el modelo no ha visto nunca.
 
-### 4.3 The vocabulary leaks too
+### 4.3 El vocabulario también se filtra
 
 ```
 test tokens                                   : 103,574
@@ -188,19 +197,20 @@ tokens unseen in train                        :       4  (0.004%)
 test examples containing zero unseen tokens   : 11,841 / 11,845  (99.97%)
 ```
 
-The four unseen tokens are `dias!`, `dia?`, `ola!`, `saludos!!` — punctuation artefacts, not new
-words. (Using the model's real vocabulary, which drops hapaxes at `MIN_WORD_FREQ = 2`, the count
-rises to 7 out of 103,574 — same conclusion.)
+Los cuatro tokens no vistos son `dias!`, `dia?`, `ola!`, `saludos!!`: artefactos de puntuación, no
+palabras nuevas. (Usando el vocabulario real del modelo, que descarta los hápax con
+`MIN_WORD_FREQ = 2`, la cuenta sube a 7 de 103.574; la conclusión es la misma.)
 
-**Together, 4.2 and 4.3 say the test set is a memorisation probe.** A model that stores
-skeleton→label pairs and does nothing else scores about 98.7% here. That is the floor these five
-models are clustered just above, which is exactly what the 21-error spread looks like.
+**Juntas, 4.2 y 4.3 dicen que el conjunto de test es una prueba de memorización.** Un modelo que se
+limite a guardar pares esqueleto→etiqueta y nada más saca aquí en torno al 98,7%. Ese es el suelo
+justo por encima del cual están apiñados estos cinco modelos, que es exactamente lo que parece la
+horquilla de 21 errores.
 
-### 4.4 Most of the remaining error is my own label noise
+### 4.4 La mayor parte del error restante es ruido de etiqueta que introduje yo
 
-Deduplication in `generate_intent()` uses a `seen_texts` set that is **local to each intent**
-(`build_dataset.py:883`). Nothing checks for the same string being emitted under two different
-labels. Measured across the full dataset:
+La deduplicación de `generate_intent()` usa un conjunto `seen_texts` que es **local a cada
+intención** (`build_dataset.py:883`). Nada comprueba si una misma cadena se emite con dos etiquetas
+distintas. Medido sobre el dataset completo:
 
 ```
 texts appearing with contradictory labels : 87
@@ -208,93 +218,97 @@ texts appearing with contradictory labels : 87
   (greeting, help)                        :  1
 ```
 
-All 86 come from one template — `"¿Qué le toca a {person} {date}?"` — written into
-`gen_list_medications` at **`build_dataset.py:407`** and, verbatim, into `gen_list_reminders` at
-**`build_dataset.py:582`**. The sentence is genuinely ambiguous in Spanish ("what's due for X on
-Y?" — medication or appointment?), and I labelled it both ways. Across the whole dataset that
-skeleton carries the `list_medications` label 501 times and `list_reminders` 476 times.
+Los 86 vienen de una única plantilla —`"¿Qué le toca a {person} {date}?"`— escrita en
+`gen_list_medications` en **`build_dataset.py:407`** y, literalmente igual, en `gen_list_reminders`
+en **`build_dataset.py:582`**. La frase es genuinamente ambigua en español (¿qué le toca: la
+medicación o una cita?), y yo la etiqueté de las dos maneras. En el dataset completo ese esqueleto
+lleva la etiqueta `list_medications` 501 veces y `list_reminders` 476 veces.
 
-The BiLSTM's confusion matrix contains exactly two off-diagonal cells:
+La matriz de confusión del BiLSTM tiene exactamente dos celdas fuera de la diagonal:
 
 ```
 list_medications -> list_reminders : 52
 greeting         -> list_reminders :  1
 ```
 
-| Intent | Precision | Recall | Support |
+| Intención | Precisión | Recall | Soporte |
 |---|---:|---:|---:|
 | `list_medications` | 1.0000 | 0.9487 | 1,014 |
 | `list_reminders` | 0.9372 | 1.0000 | 791 |
 | `greeting` | 1.0000 | 0.9773 | 44 |
 
-The test split contains **exactly 52** `list_medications` examples built from the colliding
-skeleton, and the model makes **exactly 52** `list_medications` errors, all of them predicted as
-`list_reminders`. The confusion matrix alone does not identify examples one by one, but the counts
-coincide and the mechanism is visible in the generator source. **52 of the model's 53 errors sit on
-label noise I injected myself**, on a sentence with no correct answer. The 53rd is a single
-`greeting` example, also predicted as `list_reminders`, which the collision does not explain.
+El split de test contiene **exactamente 52** ejemplos de `list_medications` construidos a partir del
+esqueleto en colisión, y el modelo comete **exactamente 52** errores de `list_medications`, todos
+predichos como `list_reminders`. La matriz de confusión por sí sola no identifica los ejemplos uno a
+uno, pero los recuentos coinciden y el mecanismo se ve en el código del generador. **52 de los 53
+errores del modelo caen sobre ruido de etiqueta que introduje yo mismo**, en una frase que no tiene
+respuesta correcta. El 53º es un único ejemplo de `greeting`, también predicho como
+`list_reminders`, que la colisión no explica.
 
-The BiLSTM is not 99.55% accurate because it is good. It is 99.55% accurate because 98.66% of the
-test set is memorisable and most of the remaining 1.34% is a labelling contradiction.
+El BiLSTM no acierta el 99,55% porque sea bueno. Acierta el 99,55% porque el 98,66% del conjunto de
+test es memorizable y la mayor parte del 1,34% restante es una contradicción de etiquetado.
 
-### 4.5 Minority classes have almost no test support
+### 4.5 Las clases minoritarias apenas tienen soporte en test
 
-`greeting` has 44 test examples, `list_shopping` 45, `help` 57. One error moves `greeting`'s recall
-by 2.3 points. F1-macro — the metric I argue is the right one under 43.5x imbalance — is therefore
-dominated by three classes whose measurement is very noisy. That is a second reason not to read the
-macro ranking as a fine-grained ordering.
+`greeting` tiene 44 ejemplos en test, `list_shopping` 45 y `help` 57. Un solo error mueve el recall
+de `greeting` 2,3 puntos. La F1-macro —la métrica que defiendo como la correcta con un desbalance de
+43,5x— queda por tanto dominada por tres clases cuya medición es muy ruidosa. Esa es una segunda
+razón para no leer el ranking macro como un orden fino.
 
-### 4.6 What I would do differently
+### 4.6 Qué haría distinto
 
-1. **Group split by template.** Assign each `(intent, skeleton)` to exactly one of train/val/test
-   *before* filling entity slots, using `GroupShuffleSplit` on the skeleton id. Then test accuracy
-   measures generalisation to unseen phrasing, which is the quantity the app actually needs.
-2. **Global deduplication with conflict detection.** Move `seen_texts` out of `generate_intent()`,
-   make it dataset-wide, and hard-fail on any string emitted under two labels. That surfaces the
-   `"¿Qué le toca a...?"` collision at generation time instead of in the confusion matrix.
-3. **Merge or disambiguate the colliding intents.** `list_medications` and `list_reminders` need
-   either a shared "what's scheduled" intent with a downstream disambiguator, or templates that are
-   actually distinguishable.
-4. **Report McNemar's test** between model pairs rather than a raw accuracy ordering.
+1. **Split por grupos a nivel de plantilla.** Asignar cada `(intent, skeleton)` a exactamente uno de
+   train/val/test *antes* de rellenar los huecos de entidad, usando `GroupShuffleSplit` sobre el id
+   de esqueleto. Así la accuracy de test mide la generalización a formulaciones no vistas, que es la
+   magnitud que la app necesita de verdad.
+2. **Deduplicación global con detección de conflictos.** Sacar `seen_texts` de `generate_intent()`,
+   hacerlo global al dataset y abortar con error ante cualquier cadena emitida con dos etiquetas.
+   Eso saca a la luz la colisión de `"¿Qué le toca a...?"` en el momento de generar, en vez de en la
+   matriz de confusión.
+3. **Fusionar o desambiguar las intenciones que colisionan.** `list_medications` y `list_reminders`
+   necesitan o bien una intención común de «qué hay programado» con un desambiguador aguas abajo, o
+   bien plantillas que sean realmente distinguibles.
+4. **Reportar el test de McNemar** entre pares de modelos en lugar de un orden bruto por accuracy.
 
-**My expectation — untested, and labelled as such:** under a template-level group split I expect
-all five models to drop materially, and I expect the gap between them to open up, with the
-embedding-based models (BiLSTM, mBERT) degrading less than TF-IDF n-grams on unseen phrasings,
-since a bag of unseen bigrams carries no signal. I have not run this experiment, so this is a
-hypothesis, not a result.
-
----
-
-## 5. What the comparison does show
-
-Stripping out the ranking, two conclusions survive the audit.
-
-**A 178M-parameter transformer does not beat a 36-millisecond Naive Bayes on this task.** BERT
-costs **3,276 s of GPU training (55 min) and 69.7x more parameters** than the BiLSTM to buy
-**0.017 percentage points** of accuracy — two errors out of 11,845, well inside the noise — while
-*losing* on F1-macro. Against Naive Bayes it buys 21 errors for a 92,000x increase in training
-time. For a bounded, closed-set intent vocabulary, model capacity is not the binding constraint;
-the data is.
-
-**The BiLSTM is the right pick under imbalance.** It wins F1-macro (0.9941 vs BERT's 0.9937) while
-being 25x faster to train and 69.7x smaller. Under 43.5x class imbalance, macro-averaged F1 is the
-metric that refuses to let the three large intents mask the small ones. The BiLSTM was selected for
-deployment on that basis plus artefact size: 9.7 MiB of ONNX ships inside the function bundle,
-where a 178M-parameter model would not.
-
-**Caveat, stated plainly.** The size and F1-macro arguments are sound; the *latency* argument in
-the thesis is not measured correctly. `avg_latency_ms` is computed as full-batch inference wall
-time divided by N (`train_svm.py:99`, `train_bilstm.py:265`), i.e. amortised throughput, not
-per-request latency in a serverless container. That is why SVM appears to run in 0.0002 ms per
-example. **There is no benchmark of the deployed ONNX session, and no cold-start measurement.** The
-correct experiment is per-request `onnxruntime-node` latency on a 512 MiB instance, warm and cold.
-It was not run, so the claim that the smaller artefact helps cold start is reasoning, not data.
+**Mi expectativa —sin comprobar, y etiquetada como tal—:** con un split por grupos a nivel de
+plantilla espero que los cinco modelos caigan de forma apreciable, y espero que la distancia entre
+ellos se abra, con los modelos basados en embeddings (BiLSTM, mBERT) degradándose menos que los
+n-gramas TF-IDF ante formulaciones no vistas, porque una bolsa de bigramas no vistos no lleva
+señal. No he ejecutado este experimento, así que esto es una hipótesis, no un resultado.
 
 ---
 
-## 6. Deployment
+## 5. Lo que la comparación sí demuestra
 
-### Export
+Quitando el ranking, dos conclusiones sobreviven a la auditoría.
+
+**Un transformer de 178M de parámetros no le gana en esta tarea a un Naive Bayes de 36
+milisegundos.** BERT cuesta **3.276 s de entrenamiento en GPU (55 min) y 69,7x más parámetros** que
+el BiLSTM para comprar **0,017 puntos porcentuales** de accuracy —dos errores sobre 11.845, muy
+dentro del ruido— y encima *pierde* en F1-macro. Frente a Naive Bayes, compra 21 errores a cambio de
+multiplicar por 92.000 el tiempo de entrenamiento. Para un vocabulario de intenciones acotado y de
+conjunto cerrado, la restricción que manda no es la capacidad del modelo: son los datos.
+
+**El BiLSTM es la elección correcta con desbalance.** Gana en F1-macro (0,9941 frente al 0,9937 de
+BERT) siendo 25x más rápido de entrenar y 69,7x más pequeño. Con un desbalance de clases de 43,5x,
+la F1 promediada por macro es la métrica que se niega a dejar que las tres intenciones grandes tapen
+a las pequeñas. El BiLSTM se eligió para el despliegue por eso y por el tamaño del artefacto: 9,7
+MiB de ONNX caben dentro del bundle de la función, donde un modelo de 178M de parámetros no cabría.
+
+**Salvedad, dicha sin rodeos.** Los argumentos de tamaño y F1-macro son sólidos; el argumento de
+*latencia* del TFM no está bien medido. `avg_latency_ms` se calcula como el tiempo de reloj de la
+inferencia sobre el batch completo dividido entre N (`train_svm.py:99`, `train_bilstm.py:265`), es
+decir, throughput amortizado, no latencia por petición en un contenedor serverless. Por eso parece
+que el SVM tarda 0,0002 ms por ejemplo. **No hay ningún benchmark de la sesión ONNX desplegada ni
+ninguna medida de cold start.** El experimento correcto es la latencia por petición de
+`onnxruntime-node` en una instancia de 512 MiB, en caliente y en frío. No se ejecutó, así que la
+afirmación de que un artefacto más pequeño ayuda en el cold start es un razonamiento, no un dato.
+
+---
+
+## 6. Despliegue
+
+### Exportación
 
 ```python
 torch.onnx.export(
@@ -306,13 +320,13 @@ torch.onnx.export(
 ```
 `convert_to_onnx.py:82-93`
 
-Result: `input_ids` INT64 `[batch, 50]` → `logits` FLOAT `[batch, 12]`, a 39-node graph.
-**10,207,804 bytes (9.7 MiB)** of ONNX plus a **22 KB** vocabulary JSON (1,384 entries including
-`<PAD>`/`<UNK>`, 12 labels, `max_seq_len: 50`). Both files are committed under
-`deployment/` and read with `fs.readFileSync` from `__dirname`, so the function downloads
-nothing at cold start.
+Resultado: `input_ids` INT64 `[batch, 50]` → `logits` FLOAT `[batch, 12]`, un grafo de 39 nodos.
+**10.207.804 bytes (9,7 MiB)** de ONNX más un JSON de vocabulario de **22 KB** (1.384 entradas
+incluyendo `<PAD>`/`<UNK>`, 12 etiquetas, `max_seq_len: 50`). Los dos ficheros están commiteados
+bajo `deployment/` y se leen con `fs.readFileSync` desde `__dirname`, así que la función no descarga
+nada en el arranque en frío.
 
-### Serving
+### Servicio
 
 ```js
 exports.chatbot = onCall({
@@ -325,45 +339,47 @@ exports.chatbot = onCall({
 ```
 `functions/index.js:4071-4076`
 
-- `onnxruntime-node ^1.21.0` on Node 24, Firebase Functions v2 callable.
-- The `InferenceSession` is held in a module-scope variable and created lazily
-  (`functions/index.js:3463-3471`), so only the first invocation on a container pays session setup.
-- App Check enforced, plus an explicit `request.auth` check. The caller's `currentHomeId` is read
-  once (`functions/index.js:4119`) and every subsequent read and write is scoped under
-  `homes/{homeId}/...`.
-- Softmax is computed in JS with the standard max-subtraction for numerical stability
-  (`functions/index.js:3493-3496`), and the top-3 alternatives are logged to Firestore.
+- `onnxruntime-node ^1.21.0` sobre Node 24, callable de Firebase Functions v2.
+- La `InferenceSession` se guarda en una variable de ámbito de módulo y se crea de forma perezosa
+  (`functions/index.js:3463-3471`), así que solo la primera invocación en un contenedor paga el
+  montaje de la sesión.
+- App Check obligatorio, más una comprobación explícita de `request.auth`. El `currentHomeId` de
+  quien llama se lee una sola vez (`functions/index.js:4119`) y todas las lecturas y escrituras
+  posteriores quedan acotadas bajo `homes/{homeId}/...`.
+- El softmax se calcula en JS con la habitual resta del máximo para dar estabilidad numérica
+  (`functions/index.js:3493-3496`), y las 3 alternativas principales se registran en Firestore.
 
-### Routing: rules first, model second, override third
+### Enrutado: primero reglas, después modelo, después override
 
-The model is not trusted to trigger writes on its own. `deployment/router.js` (234 lines) is
-a pure module with no `require` of Firebase, ONNX or the network, holding four confidence
-thresholds (`router.js:3-8`):
+No se confía en el modelo para disparar escrituras por su cuenta. `deployment/router.js` (234
+líneas) es un módulo puro, sin ningún `require` de Firebase, ONNX ni de la red, que contiene cuatro
+umbrales de confianza (`router.js:3-8`):
 
-| Threshold | Value | Meaning |
+| Umbral | Valor | Significado |
 |---|---:|---|
-| `rule` | 0.98 | A deterministic rule matched |
-| `override` | 0.95 | A rule corrected the model's output |
-| `modelDirect` | 0.85 | Below this, a model-only intent will **not** execute an action |
-| `lowFallback` | 0.70 | Below this, hand the sentence to Claude to ask a clarifying question |
+| `rule` | 0.98 | Ha casado una regla determinista |
+| `override` | 0.95 | Una regla ha corregido la salida del modelo |
+| `modelDirect` | 0.85 | Por debajo de aquí, una intención decidida solo por el modelo **no** ejecuta ninguna acción |
+| `lowFallback` | 0.70 | Por debajo de aquí, se le pasa la frase a Claude para que pida una aclaración |
 
-Flow (`functions/index.js:4220-4301`): `routeChatbotIntentByRules()` runs first; only if it returns
-`null` does the ONNX model run, followed by `applyChatbotIntentOverride()`, which holds four
-corrections for known confusion pairs (status query vs. mark-as-taken, medication vs. shopping,
-help vs. greeting). A model-only intent between 0.70 and 0.85 returns *"No estoy seguro de si
-quieres X. ¿Puedes decírmelo de otra forma?"* instead of writing to Firestore
-(`functions/index.js:4290-4300`). For an app that records medication doses, refusing to act on a
-medium-confidence guess is the correct default.
+Flujo (`functions/index.js:4220-4301`): primero se ejecuta `routeChatbotIntentByRules()`; solo si
+devuelve `null` corre el modelo ONNX, seguido de `applyChatbotIntentOverride()`, que contiene cuatro
+correcciones para pares de confusión conocidos (consulta de estado frente a marcar como tomado,
+medicación frente a compra, ayuda frente a saludo). Una intención decidida solo por el modelo con
+confianza entre 0,70 y 0,85 devuelve *«No estoy seguro de si quieres X. ¿Puedes decírmelo de otra
+forma?»* en lugar de escribir en Firestore (`functions/index.js:4290-4300`). Para una app que
+registra tomas de medicación, negarse a actuar ante una conjetura de confianza media es el
+comportamiento por defecto correcto.
 
-One rule is defensive by design: `"¿ha tomado el paracetamol?"` is a **question**, so it routes to
-`check_medication_status`, never to `mark_medication_taken` (`router.js:123-127`, applied at
-`router.js:181-183`). A classifier that marks a dose as taken because the user *asked* whether it
-was taken is a patient-safety bug.
+Una de las reglas es defensiva por diseño: `"¿ha tomado el paracetamol?"` es una **pregunta**, así
+que se enruta a `check_medication_status` y nunca a `mark_medication_taken` (`router.js:123-127`,
+aplicada en `router.js:181-183`). Un clasificador que marca una dosis como tomada porque el usuario
+*preguntó* si se había tomado es un fallo de seguridad del paciente.
 
-The rules cover 9 of the 12 intents. `add_reminder`, `add_contact` and `list_reminders` have no
-rule and always reach the model.
+Las reglas cubren 9 de las 12 intenciones. `add_reminder`, `add_contact` y `list_reminders` no
+tienen regla y siempre llegan al modelo.
 
-### Evaluation harness
+### Banco de pruebas de evaluación
 
 ```js
 const {
@@ -372,9 +388,10 @@ const {
 ```
 `tfm/evaluation/evaluate_chatbot_router.js:5-7`
 
-The harness imports **the exact module the deployed function loads** — not a re-implementation. If
-the rules drift, the harness drifts with them. 26 curated cases (accent-less input, colloquial
-phrasing, shopping-vs-medication ambiguity, questions vs. commands):
+El banco de pruebas importa **exactamente el mismo módulo que carga la función desplegada**, no una
+reimplementación. Si las reglas cambian, el banco de pruebas cambia con ellas. 26 casos escritos a
+mano (entrada sin tildes, formulación coloquial, ambigüedad compra-medicación, preguntas frente a
+órdenes):
 
 ```
 Casos totales: 26
@@ -383,36 +400,38 @@ Delegados al modelo: 2
 Errores de reglas: 0
 ```
 
-The two delegated cases are the `add_reminder` and `add_contact` sentences, which no rule claims.
+Los dos casos delegados son las frases de `add_reminder` y `add_contact`, que ninguna regla reclama.
 
-**Limitations:** those 26 cases were written by the same person who wrote the rules they test, so
-this is a regression guard, not an unbiased evaluation. It also covers the rules layer only — it
-never loads the ONNX model.
+**Limitaciones:** esos 26 casos los escribió la misma persona que escribió las reglas que ponen a
+prueba, así que esto es una red de seguridad frente a regresiones, no una evaluación imparcial.
+Además cubre solo la capa de reglas: nunca carga el modelo ONNX.
 
-### Status
+### Estado
 
-The Cloud Function, the router, the ONNX artefacts, `lib/services/chatbot_service.dart` (81 lines)
-and a Flutter chat screen (`lib/screens/home/dashboard/chatbot_screen.dart`, 448 lines) all live on
-the `tfm` branch, and were manually exercised end to end against a live Firebase project (the test
-log is in `tfm/TFM_PROGRESS.md:273-281`). **They are not merged into `master`, and the chatbot is
-not present in the published build of the app.** Section 7 is the main reason.
+La Cloud Function, el router, los artefactos ONNX, `lib/services/chatbot_service.dart` (81 líneas) y
+una pantalla de chat en Flutter (`lib/screens/home/dashboard/chatbot_screen.dart`, 448 líneas) viven
+todos en la rama `tfm`, y se probaron a mano de extremo a extremo contra un proyecto de Firebase
+real (el registro de pruebas está en `tfm/TFM_PROGRESS.md:273-281`). **No están mergeados en
+`master` y el chatbot no está presente en la build publicada de la app.** La sección 7 es el motivo
+principal.
 
 ---
 
-## 7. Known issues
+## 7. Problemas conocidos
 
-### 7.1 Train/serve tokenisation skew (real bug, unfixed)
+### 7.1 Desajuste de tokenización train/serve (bug real, sin corregir)
 
-Training tokenises with:
+El entrenamiento tokeniza con:
 
 ```python
 def tokenize(text):
     return text.lower().split()
 ```
-`train_bilstm.py:77-78` — lowercase and split on whitespace. **Punctuation and accents are kept**,
-so the learned vocabulary contains entries like `¿cuántas`, `dra.`, `mañana`, `medicación`.
+`train_bilstm.py:77-78`: minúsculas y separación por espacios en blanco. **Se conservan la
+puntuación y las tildes**, así que el vocabulario aprendido contiene entradas como `¿cuántas`,
+`dra.`, `mañana`, `medicación`.
 
-Production tokenises with:
+Producción tokeniza con:
 
 ```js
 function normalizeChatbotTextForModel(text) {
@@ -422,62 +441,64 @@ function normalizeChatbotTextForModel(text) {
       .replace(/[¿?¡!,.;()[\]{}]/g, " "));
 }
 ```
-`deployment/router.js:71-76` — **strips punctuation**, keeps accents.
+`deployment/router.js:71-76`: **elimina la puntuación** y conserva las tildes.
 
-Running that function over every entry of the shipped `bilstm_vocab.json` (1,382 entries excluding
-`<PAD>`/`<UNK>`):
+Pasando esa función sobre todas las entradas del `bilstm_vocab.json` que se distribuye (1.382
+entradas excluyendo `<PAD>`/`<UNK>`):
 
-| Effect | Count |
+| Efecto | Recuento |
 |---|---:|
-| Vocabulary entries the JS normaliser would alter | 587 / 1,382 (42.5%) |
-| Entries thereby made **unreachable** (altered form absent from vocab) | 45 |
-| Entries containing accents | 237 |
-| …of which have no accent-free twin in vocab | **221** |
+| Entradas del vocabulario que el normalizador JS alteraría | 587 / 1,382 (42.5%) |
+| Entradas que quedan así **inalcanzables** (la forma alterada no está en el vocabulario) | 45 |
+| Entradas con tildes | 237 |
+| …de las cuales no tienen gemelo sin tildes en el vocabulario | **221** |
 
-Two failure modes coexist. First, 45 vocabulary entries (`¿cuántas`, `dra.`, `2.5mg`, …) can never
-be produced by the production tokeniser — the model has weights it can no longer reach. Second, and
-worse in practice: Spanish users routinely type without accents, and the same repo's *rules*
-normaliser strips accents on that assumption (`router.js:43-45, 51-55`). The *model* normaliser
-keeps them, and 221 accented entries have no accent-free equivalent — so `"medicacion"` typed
-without the accent hits `<UNK>` while `"medicación"` resolves. The training data's own typo pass
-(`build_dataset.py:217`) deliberately generates accent-less variants, which partially masks this,
-but does not close it.
+Conviven dos modos de fallo. Primero, hay 45 entradas del vocabulario (`¿cuántas`, `dra.`, `2.5mg`,
+…) que el tokenizador de producción no puede producir nunca: el modelo tiene pesos a los que ya no
+puede llegar. Segundo, y peor en la práctica: los usuarios españoles escriben habitualmente sin
+tildes, y el normalizador de *reglas* de este mismo repo elimina las tildes partiendo de esa premisa
+(`router.js:43-45, 51-55`). El normalizador del *modelo* las conserva, y 221 entradas con tilde no
+tienen equivalente sin tilde, de modo que `"medicacion"` escrito sin tilde cae en `<UNK>` mientras
+que `"medicación"` resuelve. La pasada de erratas de los propios datos de entrenamiento
+(`build_dataset.py:217`) genera a propósito variantes sin tildes, lo que enmascara esto en parte,
+pero no lo cierra.
 
-**There is no Python↔JS tokenisation parity test.** That is the missing artefact. The fix is a
-shared normalisation spec plus a fixture file of, say, 200 strings whose token id sequences must be
-identical in both runtimes, run in CI. Finding this while auditing my own deployment is the reason
-the chatbot was not merged.
+**No hay ningún test de paridad de tokenización Python↔JS.** Ese es el artefacto que falta. El
+arreglo es una especificación de normalización compartida más un fichero de fixtures con, digamos,
+200 cadenas cuyas secuencias de ids de token deban ser idénticas en los dos runtimes, ejecutado en
+CI. Haber encontrado esto auditando mi propio despliegue es la razón de que el chatbot no se
+mergeara.
 
-### 7.2 The one confusion the model makes is unguarded
+### 7.2 La única confusión que comete el modelo no está protegida
 
-The rules return `null` for `"¿Qué le toca a mamá hoy?"` and for its accent-less form, and no
-override covers the `list_medications` / `list_reminders` pair. The exact ambiguity that produces
-52 of the model's 53 errors reaches the model with no deterministic layer in front of it and no
-correction behind it.
+Las reglas devuelven `null` para `"¿Qué le toca a mamá hoy?"` y para su forma sin tildes, y ningún
+override cubre el par `list_medications` / `list_reminders`. La ambigüedad exacta que produce 52 de
+los 53 errores del modelo le llega sin ninguna capa determinista delante ni ninguna corrección
+detrás.
 
-### 7.3 Unmeasured serving latency
+### 7.3 Latencia de servicio sin medir
 
-Covered in section 5: no per-request ONNX benchmark, no cold-start measurement. The
-BiLSTM-over-BERT decision is well supported on artefact size and F1-macro, and unsupported on
-latency.
+Tratado en la sección 5: no hay benchmark de ONNX por petición ni medida de cold start. La decisión
+de BiLSTM en lugar de BERT está bien respaldada por tamaño de artefacto y F1-macro, y sin respaldo
+en latencia.
 
-### 7.4 Entity extraction is outside the thesis
+### 7.4 La extracción de entidades queda fuera del TFM
 
-Every action requires entities, and every entity comes from a Claude Haiku call
-(`functions/index.js:3565-3607`). That means a per-request external API dependency inside a 30 s
-timeout, a cost per interaction, and a component with no accuracy measurement of any kind. A NER
-head trained alongside the classifier — using the entity spans the generator already knows — is the
-obvious next step and is not done.
+Toda acción necesita entidades, y toda entidad sale de una llamada a Claude Haiku
+(`functions/index.js:3565-3607`). Eso significa una dependencia de una API externa en cada petición
+dentro de un timeout de 30 s, un coste por interacción y un componente sin ninguna medida de
+precisión de ningún tipo. Una cabeza de NER entrenada junto al clasificador —usando los spans de
+entidad que el generador ya conoce— es el siguiente paso evidente y está sin hacer.
 
-### 7.5 Single language, single register
+### 7.5 Un solo idioma, un solo registro
 
-Spanish only. The dataset's register is peninsular and family-colloquial (`la yaya`, `Mercadona`,
-`el estanco`). `bert-base-multilingual-cased` was chosen partly to make a later Catalan extension
-cheap, but no multilingual evaluation was run.
+Solo español. El registro del dataset es peninsular y familiar-coloquial (`la yaya`, `Mercadona`,
+`el estanco`). `bert-base-multilingual-cased` se eligió en parte para abaratar una extensión
+posterior al catalán, pero no se ejecutó ninguna evaluación multilingüe.
 
 ---
 
-## 8. Reproducing this
+## 8. Cómo reproducirlo
 
 ```bash
 git checkout tfm
@@ -506,12 +527,12 @@ python convert_to_onnx.py        # -> models/bilstm_model.onnx + bilstm_vocab.js
 node evaluation/evaluate_chatbot_router.js
 ```
 
-`requirements.txt` pins `torch>=2.0.0` without a CUDA index; install the wheel matching your own
-CUDA version first if you want GPU training.
+`requirements.txt` fija `torch>=2.0.0` sin índice de CUDA; instala primero la wheel que corresponda
+a tu propia versión de CUDA si quieres entrenar en GPU.
 
-### Reproducing the leakage measurement
+### Reproducir la medición de la fuga
 
-The audit in section 4 is the part worth re-running. This is the whole of it:
+La auditoría de la sección 4 es la parte que merece la pena reejecutar. Esto es todo:
 
 ```python
 import json
@@ -551,7 +572,7 @@ print(f"contradictory labels: {sum(1 for v in labels.values() if len(v) > 1)}")
 
 ---
 
-## Repository layout
+## Estructura del repositorio
 
 ```
 tfm/                                  (branch: tfm)
@@ -579,13 +600,13 @@ lib/
 
 ---
 
-## Closing note
+## Nota final
 
-The number I would defend is not 99.57%. It is this: five very different model families landed
-within 21 errors of each other, and rather than reading that uniformity as confirmation, I measured
-the benchmark itself until I could account for where the number came from. It came from a flat
-shuffle over templated data — 98.66% template leakage — and a template collision I wrote myself,
-which accounts for 52 of the winning model's 53 remaining errors.
+El número que defendería no es el 99,57%. Es este: cinco familias de modelos muy distintas quedaron
+a 21 errores unas de otras y, en lugar de leer esa uniformidad como una confirmación, medí el propio
+benchmark hasta poder explicar de dónde salía la cifra. Salía de un shuffle plano sobre datos
+generados con plantillas —un 98,66% de fuga de plantillas— y de una colisión de plantillas que
+escribí yo mismo, que explica 52 de los 53 errores restantes del modelo ganador.
 
-The same pass over the deployment found a 42.5% mismatch between the training and serving
-tokenisers, which is why the chatbot is still on a branch.
+La misma pasada sobre el despliegue encontró un 42,5% de desajuste entre el tokenizador de
+entrenamiento y el de servicio, que es la razón de que el chatbot siga en una rama.
