@@ -1,0 +1,26 @@
+{"text":"ya me he tomado el paracetamol de hoy","expected_intent":"mark_medication_taken","category":"medication_taken_noise"}
+{"text":"me he tomado el paracetamol","expected_intent":"mark_medication_taken","category":"medication_taken_self"}
+{"text":"la yaya ya se ha tomado la pastilla de la tension","expected_intent":"mark_medication_taken","category":"medication_taken_colloquial"}
+{"text":"marca como tomado el ibuprofeno de demo","expected_intent":"mark_medication_taken","category":"medication_taken_direct"}
+{"text":"he tomado omeprazol esta manana","expected_intent":"mark_medication_taken","category":"medication_taken_no_accents"}
+{"text":"oye apunta que mama ha tomado el nolotil","expected_intent":"mark_medication_taken","category":"medication_taken_noise"}
+{"text":"ya he comprado pan","expected_intent":"mark_shopping_done","category":"shopping_done"}
+{"text":"he comprado la leche","expected_intent":"mark_shopping_done","category":"shopping_done"}
+{"text":"marca huevos como comprado","expected_intent":"mark_shopping_done","category":"shopping_done"}
+{"text":"anade leche pan y huevos a la lista","expected_intent":"add_shopping_item","category":"shopping_add_no_accents"}
+{"text":"mete tomates en la compra","expected_intent":"add_shopping_item","category":"shopping_add_colloquial"}
+{"text":"apunta arroz para mercadona","expected_intent":"add_shopping_item","category":"shopping_add_store"}
+{"text":"que hay en la lista de la compra","expected_intent":"list_shopping","category":"shopping_list"}
+{"text":"ensename la lista","expected_intent":"list_shopping","category":"shopping_list_noise"}
+{"text":"que medicamentos toma demo","expected_intent":"list_medications","category":"medication_list"}
+{"text":"dime las pastillas de francisco","expected_intent":"list_medications","category":"medication_list_colloquial"}
+{"text":"ha tomado todo demo hoy","expected_intent":"check_medication_status","category":"medication_status"}
+{"text":"ha tomado demo el paracetamol?","expected_intent":"check_medication_status","category":"medication_status_question"}
+{"text":"queda alguna pastilla pendiente de mama","expected_intent":"check_medication_status","category":"medication_status"}
+{"text":"comprueba la medicacion de hoy de la yaya","expected_intent":"check_medication_status","category":"medication_status"}
+{"text":"que puedes hacer","expected_intent":"help","category":"help"}
+{"text":"ayuda","expected_intent":"help","category":"help"}
+{"text":"hola buenas","expected_intent":"greeting","category":"greeting"}
+{"text":"recuerdame manana a las 9 la cita del medico de mama","expected_intent":"add_reminder","category":"reminder_add"}
+{"text":"anade el telefono del doctor garcia 612345678 para la yaya","expected_intent":"add_contact","category":"contact_add"}
+{"text":"pon paracetamol 500 cada 8 horas a las 9 para demo","expected_intent":"add_medication","category":"medication_add"}

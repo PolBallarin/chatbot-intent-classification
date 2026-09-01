@@ -1,0 +1,26 @@
+Copyright (c) 2026 Pol Ballarin. All rights reserved.
+
+EVALUATION-ONLY LICENCE
+
+This repository contains the author's MSc thesis work (Master's in Artificial
+Intelligence and Big Data): a comparative study of intent-classification models
+and the deployment of the selected model to a serverless runtime.
+
+It is published for one purpose only: so that prospective employers,
+collaborators and reviewers can evaluate the author's engineering and research
+work.
+
+You MAY:
+  - read this material;
+  - quote short excerpts when discussing or assessing the author's work.
+
+You MAY NOT, without prior written permission from the author:
+  - copy, reproduce or redistribute this material, in whole or in part;
+  - modify it or create derivative works from it;
+  - incorporate it into any project, product or service, commercial or not;
+  - use the code, the dataset generator or the trained model to train other
+    machine learning models.
+
+The trained model in `deployment/` was fitted on synthetically generated data
+and is provided for inspection only. It carries no warranty of any kind and is
+not fit for clinical, medical or safety-critical use.

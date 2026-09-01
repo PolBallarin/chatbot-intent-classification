@@ -1,0 +1,41 @@
+{
+  "best_model": "BERT",
+  "best_accuracy": 0.9956943858168004,
+  "models": {
+    "SVM": {
+      "accuracy": 0.9949345715491769,
+      "f1_macro": 0.9911897244053578,
+      "f1_weighted": 0.9949354000242443,
+      "avg_latency_ms": 0.0002214907593443304,
+      "train_time_seconds": 4.942059755325317
+    },
+    "Random Forest": {
+      "accuracy": 0.9941747572815534,
+      "f1_macro": 0.9895587500764597,
+      "f1_weighted": 0.9941747630721559,
+      "avg_latency_ms": 0.006743974955386882,
+      "train_time_seconds": 6.814556360244751
+    },
+    "Naive Bayes": {
+      "accuracy": 0.9939214858590122,
+      "f1_macro": 0.9889615738131492,
+      "f1_weighted": 0.9939077961823309,
+      "avg_latency_ms": 0.00034582267687158674,
+      "train_time_seconds": 0.035572052001953125
+    },
+    "BiLSTM": {
+      "accuracy": 0.9955255382017729,
+      "f1_macro": 0.9941478379593399,
+      "f1_weighted": 0.9955398112075962,
+      "avg_latency_ms": 0.12958093049809016,
+      "train_time_seconds": 131.00317335128784
+    },
+    "BERT": {
+      "accuracy": 0.9956943858168004,
+      "f1_macro": 0.993658222307105,
+      "f1_weighted": 0.9957029045556156,
+      "avg_latency_ms": 1.1003996662672886,
+      "train_time_seconds": 3276.5043625831604
+    }
+  }
+}

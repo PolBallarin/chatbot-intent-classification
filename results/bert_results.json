@@ -1,0 +1,269 @@
+{
+  "model": "BERT multilingual",
+  "base_model": "bert-base-multilingual-cased",
+  "accuracy": 0.9956943858168004,
+  "f1_macro": 0.993658222307105,
+  "f1_weighted": 0.9957029045556156,
+  "train_time_seconds": 3276.5043625831604,
+  "avg_latency_ms": 1.1003996662672886,
+  "best_epoch": 2,
+  "total_params": 177862668,
+  "per_intent": {
+    "add_contact": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 1506.0
+    },
+    "add_medication": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 2038.0
+    },
+    "add_reminder": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 2019.0
+    },
+    "add_shopping_item": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 1529.0
+    },
+    "check_medication_status": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 565.0
+    },
+    "greeting": {
+      "precision": 0.9777777777777777,
+      "recall": 1.0,
+      "f1": 0.9887640449438202,
+      "support": 44.0
+    },
+    "help": {
+      "precision": 1.0,
+      "recall": 0.9824561403508771,
+      "f1": 0.9911504424778761,
+      "support": 57.0
+    },
+    "list_medications": {
+      "precision": 0.9918367346938776,
+      "recall": 0.9585798816568047,
+      "f1": 0.9749247743229689,
+      "support": 1014.0
+    },
+    "list_reminders": {
+      "precision": 0.9490909090909091,
+      "recall": 0.9898862199747156,
+      "f1": 0.969059405940594,
+      "support": 791.0
+    },
+    "list_shopping": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 45.0
+    },
+    "mark_medication_taken": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 1446.0
+    },
+    "mark_shopping_done": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 791.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      1506,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      2038,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      2019,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      1529,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      565,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      44,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      56,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      972,
+      42,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8,
+      783,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      45,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1446,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      791
+    ]
+  ],
+  "labels": [
+    "add_contact",
+    "add_medication",
+    "add_reminder",
+    "add_shopping_item",
+    "check_medication_status",
+    "greeting",
+    "help",
+    "list_medications",
+    "list_reminders",
+    "list_shopping",
+    "mark_medication_taken",
+    "mark_shopping_done"
+  ]
+}
