@@ -1,15 +1,35 @@
-# Clasificación de intenciones en español para un asistente de cuidados
+# Asistente conversacional para una app de cuidados
 
 Trabajo de fin de máster (Big Data e IA). Proyecto personal, desarrollador único, construido con
 ayuda de IA (Claude Code y Codex) como parte de mi flujo de trabajo diario; la metodología, el
 análisis que sigue y las conclusiones son míos.
-El pipeline de entrenamiento, los ficheros de resultados en bruto y los artefactos de despliegue están todos en este repositorio.
-La app para la que se construyeron es privada; las rutas bajo `functions/` apuntan a ese código privado.
 
-Cinco clasificadores de intenciones entrenados sobre 118.445 frases sintéticas en español repartidas
-en 12 intenciones. El mejor de ellos se exportó a ONNX y se conectó a una función callable de
-Firebase. Lo interesante de este repositorio no es la tabla de accuracy: es la auditoría que
-explica por qué esa tabla no significa casi nada.
+### Qué hace
+
+Plamily es una app que construí para familias que coordinan el cuidado de un familiar mayor:
+medicación, recordatorios, lista de la compra compartida, contactos. Este asistente convierte una
+frase —escrita o dictada— en una acción dentro de la app: añadir un medicamento, marcar una toma
+como tomada, crear un recordatorio o apuntar algo en la compra.
+
+En lugar de recorrer cuatro pantallas para apuntar una pastilla, dices *«apúntame paracetamol cada
+8 horas»* y queda hecho. El objetivo a medio plazo es exponerlo a través de Alexa o Siri, de forma
+que el cuidador no tenga ni que abrir la app: la mayoría de estas anotaciones se hacen con las
+manos ocupadas.
+
+### Qué estudia el TFM
+
+La primera etapa de ese pipeline: **decidir cuál de las 12 acciones posibles está pidiendo el
+usuario**. Cinco familias de modelos comparadas sobre 118.445 frases en español; el BiLSTM ganador
+se exportó a ONNX y se sirve desde una Cloud Function.
+
+### Qué encontré
+
+Lo interesante de este repositorio no es la tabla de accuracy: es la auditoría que explica por qué
+esa tabla no significa casi nada.
+
+El pipeline de entrenamiento, los ficheros de resultados en bruto y los artefactos de despliegue
+están todos aquí. La app para la que se construyeron es privada; las rutas bajo `functions/`
+apuntan a ese código privado.
 
 ## TL;DR
 
