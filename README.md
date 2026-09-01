@@ -1,6 +1,8 @@
 # Spanish intent classification for a caregiving assistant
 
-Master's thesis (Big Data & AI). Personal project, sole developer.
+Master's thesis (Big Data & AI). Personal project, sole developer, built with AI assistance
+(Claude Code and Codex) as part of my day-to-day workflow; the methodology, the analysis below
+and the conclusions are mine.
 The training pipeline, the raw result files and the deployment artifacts are all in this repository.
 The app they were built for is private; paths under `functions/` refer to that private codebase.
 
@@ -84,7 +86,7 @@ to mine — a cold start with zero in-domain data. Two options were on the table
 1. Generate with an LLM (`generate_dataset.py`, `claude-sonnet-4-20250514` at line 326).
    Estimated ~$80 for the target volume. **Never executed** — discarded on cost
    (`TFM_PROGRESS.md:196`).
-2. Generate locally from hand-written templates plus randomised entity slots
+2. Generate locally from fixed templates plus randomised entity slots
    (`build_dataset.py`, 969 lines). Free, instant, deterministic. **This is what produced the data.**
 
 **How it works.** Twelve generator functions compose f-string templates with curated entity pools —
@@ -371,7 +373,7 @@ const {
 `tfm/evaluation/evaluate_chatbot_router.js:5-7`
 
 The harness imports **the exact module the deployed function loads** — not a re-implementation. If
-the rules drift, the harness drifts with them. 26 hand-written cases (accent-less input, colloquial
+the rules drift, the harness drifts with them. 26 curated cases (accent-less input, colloquial
 phrasing, shopping-vs-medication ambiguity, questions vs. commands):
 
 ```
@@ -560,7 +562,7 @@ tfm/                                  (branch: tfm)
   compare_models.py
   results/*.json                      # Per-model metrics, per-intent P/R/F1, confusion matrices
   evaluation/
-    chatbot_intent_cases.jsonl        # 26 hand-written routing cases
+    chatbot_intent_cases.jsonl        # 26 curated routing cases
     evaluate_chatbot_router.js        # Imports the deployed router module directly
 
 functions/
